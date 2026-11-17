@@ -439,6 +439,16 @@ const Store = {
 };
 if(bc) bc.onmessage = () => { if(Store.mode === 'local'){ Store.data = LS.get('dash:data', {}); Store.listeners.forEach(f => f(Store.data)); } };
 
+// 명덕초 대시보드 기본 Firebase 프로젝트 (웹 설정값은 공개용 값이며, 보안은 DB 규칙 + 익명 로그인으로 지킴)
+const BUILTIN_FB = {
+  apiKey: "AIzaSyDSkVMCuh3PCEzsEF3RfzbL3EeAWaQOM20",
+  authDomain: "dashmduck.firebaseapp.com",
+  databaseURL: "https://dashmduck-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "dashmduck",
+  storageBucket: "dashmduck.firebasestorage.app",
+  messagingSenderId: "887856328043",
+  appId: "1:887856328043:web:fca964ae719d660637b02e"
+};
 function setSync(state, text){
   $('#syncDot').className = 'dot ' + state;
   $('#syncText').textContent = text;
@@ -448,14 +458,14 @@ function loadScript(src){
 }
 async function startSync(){
   const cfg = LS.get('dash:sync', null);
-  if(!cfg || !cfg.config || !cfg.code){ setSync('', '이 기기에만 저장'); return; }
+  if(!cfg || !cfg.code){ setSync('', '이 기기에만 저장'); return; }
   setSync('wait', '연결 중…');
   try{
     const V = '10.12.2';
     await loadScript(`https://www.gstatic.com/firebasejs/${V}/firebase-app-compat.js`);
     await loadScript(`https://www.gstatic.com/firebasejs/${V}/firebase-auth-compat.js`);
     await loadScript(`https://www.gstatic.com/firebasejs/${V}/firebase-database-compat.js`);
-    firebase.initializeApp(cfg.config);
+    firebase.initializeApp(cfg.config || BUILTIN_FB);
     try{ await firebase.auth().signInAnonymously(); }catch(e){ console.warn('익명 로그인 실패(규칙이 공개면 무시 가능):', e.code); }
     const ref = firebase.database().ref('classes/' + cfg.code);
     const first = await ref.once('value');
@@ -478,8 +488,8 @@ async function startSync(){
   if(m){
     try{
       const j = JSON.parse(atob(decodeURIComponent(m[1])));
-      if(j.code && j.config){
-        LS.set('dash:sync', {code: j.code, config: j.config});
+      if(j.code){
+        LS.set('dash:sync', {code: j.code, config: j.config || null});
         if(j.mode){ LS.set('dash:mode', j.mode); if(j.mode === 'student') LS.set('dash:locked', true); }
       }
     }catch(e){ console.warn('연결 링크 오류', e); }
@@ -988,7 +998,8 @@ function openSettings(){
   <section><h4>🔄 여러 기기 동기화 (Firebase)</h4>
     <p class="help">교실의 기기마다 <b>같은 Firebase 설정과 같은 학급 코드</b>를 넣으면 실시간으로 함께 바뀌어요. 이 항목은 기기마다 따로 저장돼요.</p>
     <div class="row"><label>학급 코드</label><input id="syncCode" value="${esc(sync.code || '')}" placeholder="영문·숫자 (예: hakpo-3-2)" style="flex:1"></div>
-    <textarea id="syncCfg" placeholder="Firebase 콘솔의 firebaseConfig 코드를 그대로 붙여넣기">${sync.config ? esc(JSON.stringify(sync.config, null, 2)) : ''}</textarea>
+    <p class="help">학급 코드만 넣고 <b>연결</b>을 누르면 학교 기본 Firebase(dashmduck)로 연결돼요. 아래 칸은 다른 Firebase 프로젝트를 쓸 때나 연결 링크를 붙여넣을 때만 써요.</p>
+    <textarea id="syncCfg" placeholder="(비워 두면 기본 Firebase 사용) 다른 프로젝트의 firebaseConfig 또는 연결 링크">${sync.config ? esc(JSON.stringify(sync.config, null, 2)) : ''}</textarea>
     <div class="row"><button class="btn" type="button" id="syncOn">연결</button><button class="btn gray" type="button" id="syncOff">연결 해제</button></div>
     <p class="help">다른 기기에서 받은 <b>연결 링크</b>를 위 칸에 붙여넣어도 연결돼요 (exe로 쓰는 컴퓨터).</p>
     ${sync.code ? `<div style="margin-top:12px"><h4>📱 다른 기기 연결하기 (QR)</h4>
@@ -1068,11 +1079,12 @@ function openSettings(){
     const raw = $('#syncCfg').value, config = {};
     const jm = raw.match(/#join=([^\s&]+)/);
     if(jm){
-      try{ const j = JSON.parse(atob(decodeURIComponent(jm[1]))); LS.set('dash:sync', {code: j.code, config: j.config}); return location.reload(); }
+      try{ const j = JSON.parse(atob(decodeURIComponent(jm[1]))); LS.set('dash:sync', {code: j.code, config: j.config || null}); return location.reload(); }
       catch(e){ return toast('연결 링크가 올바르지 않아요'); }
     }
     for(const m of raw.matchAll(/["']?(\w+)["']?\s*:\s*["']([^"']*)["']/g)) config[m[1]] = m[2];
     if(!code) return toast('학급 코드를 영문·숫자로 입력하세요');
+    if(!raw.trim()){ LS.set('dash:sync', {code, config: null}); return location.reload(); }   // 기본 Firebase
     if(!config.apiKey || !config.projectId) return toast('firebaseConfig 를 확인하세요');
     if(!config.databaseURL) return toast('databaseURL 이 없어요 – Realtime Database 를 먼저 만든 뒤 설정을 다시 복사하세요');
     LS.set('dash:sync', {code, config}); location.reload();
@@ -1081,7 +1093,7 @@ function openSettings(){
   $('#viewMode').value = viewMode;
   document.querySelectorAll('[data-join]').forEach(b => b.onclick = async () => {
     const mode = b.dataset.join, base = $('#joinBase').value.trim();
-    const link = base.split('#')[0] + '#join=' + encodeURIComponent(btoa(JSON.stringify({code: sync.code, config: sync.config, mode})));
+    const link = base.split('#')[0] + '#join=' + encodeURIComponent(btoa(JSON.stringify(sync.config ? {code: sync.code, config: sync.config, mode} : {code: sync.code, mode})));
     const box = $('#qrBox');
     box.innerHTML = `<div id="qr"></div><div style="flex:1;min-width:220px"><b>${mode === 'student' ? '학생용' : '교사용'} 연결</b>
       <textarea readonly style="min-height:80px;margin-top:6px">${esc(link)}</textarea><button class="btn gray" type="button" id="copyLink">링크 복사</button></div>`;
