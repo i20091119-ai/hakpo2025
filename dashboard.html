@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>우리 반 대시보드</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#ffc7d6">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Jua&family=Gowun+Dodum&family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
 <style>
@@ -257,6 +263,7 @@ body.student .tile{font-size:clamp(22px,2.6vw,50px)}
     <div class="top-clock" id="topClock"></div>
     <div class="spacer"></div>
     <div class="sync"><span class="dot" id="syncDot"></span><span id="syncText">이 기기에만 저장</span></div>
+    <button class="pill t-only" id="btnInstall" style="display:none">📲 앱 설치</button>
     <button class="pill" id="btnFull">⛶ 전체화면</button>
     <button class="pill" id="btnLock">🔓 잠금</button>
     <button class="pill t-only" id="btnSettings">⚙️ 설정</button>
@@ -1170,6 +1177,13 @@ setInterval(() => loadWeather(true), 30 * 60 * 1000);
 setInterval(() => loadMeal(true), 2 * 60 * 60 * 1000);
 window.addEventListener('resize', renderStudents);
 startSync().then(pruneChecks);
+
+/* ================= 웹앱(PWA) 설치 ================= */
+if('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+let installEvt = null;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; $('#btnInstall').style.display = ''; });
+$('#btnInstall').onclick = async () => { if(!installEvt) return; installEvt.prompt(); await installEvt.userChoice; installEvt = null; $('#btnInstall').style.display = 'none'; };
+window.addEventListener('appinstalled', () => toast('앱으로 설치했어요'));
 </script>
 </body>
 </html>
