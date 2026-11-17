@@ -185,6 +185,15 @@ button:active{transform:scale(.95)}
 /* 잠금 */
 body.locked .t-only{display:none !important}
 body.locked .site{pointer-events:none;opacity:.55}
+/* 학생용 화면 모드: 이름 체크 공간만 크게 */
+.top-clock{display:none;font-family:'Jua';font-size:clamp(22px,2vw,38px);color:#ff7a9c;background:#fff;padding:4px 20px;border-radius:999px;border:3px solid var(--pink)}
+body.student .top-clock{display:block}
+body.student .app{grid-template-rows:auto minmax(0,1fr)}
+body.student .app > .card:not(.a-stu), body.student .a-mid{display:none !important}
+body.student .a-stu{grid-row:2}
+body.student .tile{font-size:clamp(22px,2.6vw,50px)}
+#qrBox{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-top:8px}
+#qrBox canvas,#qrBox img{border:8px solid #fff;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.1)}
 
 /* 모달 */
 .overlay{position:fixed;inset:0;background:rgba(74,59,82,.4);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
@@ -245,6 +254,7 @@ body.locked .site{pointer-events:none;opacity:.55}
 <div class="app">
   <div class="topbar">
     <div class="classname"><img class="logo" id="logo" alt=""><span id="className">우리 반</span></div>
+    <div class="top-clock" id="topClock"></div>
     <div class="spacer"></div>
     <div class="sync"><span class="dot" id="syncDot"></span><span id="syncText">이 기기에만 저장</span></div>
     <button class="pill" id="btnFull">⛶ 전체화면</button>
@@ -462,6 +472,24 @@ async function startSync(){
 }
 
 /* ================= 잠금 ================= */
+// 연결 링크(#join=...)로 열면 동기화 설정을 자동 저장
+(() => {
+  const m = location.hash.match(/#join=([^&]+)/);
+  if(m){
+    try{
+      const j = JSON.parse(atob(decodeURIComponent(m[1])));
+      if(j.code && j.config){
+        LS.set('dash:sync', {code: j.code, config: j.config});
+        if(j.mode){ LS.set('dash:mode', j.mode); if(j.mode === 'student') LS.set('dash:locked', true); }
+      }
+    }catch(e){ console.warn('연결 링크 오류', e); }
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+  const qm = new URLSearchParams(location.search).get('mode');
+  if(qm === 'student' || qm === 'full'){ LS.set('dash:mode', qm); if(qm === 'student' && !LS.get('dash:modeLocked', false)){ LS.set('dash:locked', true); LS.set('dash:modeLocked', true); } }
+})();
+let viewMode = LS.get('dash:mode', 'full');
+document.body.classList.toggle('student', viewMode === 'student');
 let locked = LS.get('dash:locked', false);
 function applyLock(){
   document.body.classList.toggle('locked', locked);
@@ -526,6 +554,7 @@ function tick(){
   const h = d.getHours(), ap = h < 12 ? '오전' : '오후', h12 = h % 12 || 12;
   $('#clockTime').innerHTML = `${h12}:${pad(d.getMinutes())}<small>${pad(d.getSeconds())}</small>`;
   drawAnalog(d);
+  $('#topClock').textContent = `${d.getMonth()+1}/${d.getDate()}(${DOW[d.getDay()]}) ${h12}:${pad(d.getMinutes())}`;
   if(d.getMinutes() !== lastMinute){ lastMinute = d.getMinutes(); renderTimetable(); if(d.getHours() === 14 && d.getMinutes() === 0) loadMeal(true); }
   if(ymd(d) !== lastDay){ lastDay = ymd(d); calOffset = 0; pruneChecks(); renderAll(); loadMeal(true); }
   timerTick();
@@ -792,7 +821,10 @@ function renderStudents(){
     + '<span class="stu-hint">번호를 누르면 체크 · 잘못 눌렀으면 길게 누르기</span>';
   const done = checks[curTask] || {};
   const hasNames = list.some(x => x.name);
-  const cols = window.matchMedia('(max-width:900px),(orientation:portrait)').matches ? (hasNames ? 4 : 6) : Math.ceil(N / (hasNames && N > 20 ? 3 : 2));
+  const narrow = window.matchMedia('(max-width:900px),(orientation:portrait)').matches;
+  const cols = narrow ? (hasNames ? 4 : 6)
+    : viewMode === 'student' ? Math.ceil(Math.sqrt(N * (hasNames ? 1.3 : 1.8)))
+    : Math.ceil(N / (hasNames && N > 20 ? 3 : 2));
   const icon = esc(tasks.find(t => t.id === curTask)?.icon || '⭐');
   const tiles = $('#tiles');
   tiles.style.gridTemplateColumns = `repeat(${cols}, minmax(0,1fr))`;
@@ -903,6 +935,10 @@ $('#clockCard').onclick = () => { if(!locked || tAlarm) $('#toolsOv').classList.
 $('#toolsClose').onclick = () => { $('#toolsOv').classList.remove('show'); tAlarm = false; timerTick(); };
 
 /* ================= 설정 ================= */
+function joinBase(){
+  const local = /^(127\.0\.0\.1|localhost)$/.test(location.hostname);
+  return location.protocol.startsWith('http') && !local ? location.origin + location.pathname : 'https://i20091119-ai.github.io/hakpo2025/dashboard.html';
+}
 $('#btnSettings').onclick = openSettings;
 function openSettings(){
   if(locked) return;
@@ -946,11 +982,20 @@ function openSettings(){
     <p class="help">비워 두면 이름 대신 번호(학생 수만큼)로 표시돼요. 엑셀에서 이름 칸을 복사해 붙여넣어도 돼요.</p></section>
   <section><h4>학생 조작 탭</h4><div id="taskRows"></div><button class="btn gray" type="button" id="taskAdd">＋ 탭 추가</button>
     <p class="help">학생 체크는 매일 자정에 자동으로 초기화돼요.</p></section>
+  <section><h4>🖥️ 이 기기 화면</h4>
+    <div class="row"><select id="viewMode"><option value="full">전체 대시보드 (교사용·전자칠판)</option><option value="student">학생용 (이름 체크 공간만 크게)</option></select></div>
+    <p class="help">기기마다 따로 정해요. 학생용으로 바꾸면 자동으로 잠겨요.</p></section>
   <section><h4>🔄 여러 기기 동기화 (Firebase)</h4>
     <p class="help">교실의 기기마다 <b>같은 Firebase 설정과 같은 학급 코드</b>를 넣으면 실시간으로 함께 바뀌어요. 이 항목은 기기마다 따로 저장돼요.</p>
     <div class="row"><label>학급 코드</label><input id="syncCode" value="${esc(sync.code || '')}" placeholder="영문·숫자 (예: hakpo-3-2)" style="flex:1"></div>
     <textarea id="syncCfg" placeholder="Firebase 콘솔의 firebaseConfig 코드를 그대로 붙여넣기">${sync.config ? esc(JSON.stringify(sync.config, null, 2)) : ''}</textarea>
     <div class="row"><button class="btn" type="button" id="syncOn">연결</button><button class="btn gray" type="button" id="syncOff">연결 해제</button></div>
+    <p class="help">다른 기기에서 받은 <b>연결 링크</b>를 위 칸에 붙여넣어도 연결돼요 (exe로 쓰는 컴퓨터).</p>
+    ${sync.code ? `<div style="margin-top:12px"><h4>📱 다른 기기 연결하기 (QR)</h4>
+      <div class="row"><label>웹 주소</label><input id="joinBase" style="flex:1" value="${esc(joinBase())}"></div>
+      <div class="row"><button class="btn" type="button" data-join="full">교사용 QR</button><button class="btn" type="button" data-join="student" style="background:var(--red);box-shadow:0 4px 0 #e04a6c">학생용 QR</button></div>
+      <div id="qrBox"></div>
+      <p class="help">태블릿 카메라로 QR을 찍으면 Firebase 설정 없이 바로 연결돼요. 웹 주소는 GitHub Pages 주소예요.</p></div>` : ''}
     <details class="help"><summary>Firebase 설정 방법</summary>
       <ol><li>console.firebase.google.com 에서 프로젝트 만들기</li>
       <li>빌드 → Realtime Database → 데이터베이스 만들기 (위치: 싱가포르 asia-southeast1 권장)</li>
@@ -1021,6 +1066,11 @@ function openSettings(){
   $('#syncOn').onclick = () => {
     const code = $('#syncCode').value.trim().replace(/[^A-Za-z0-9_-]/g, '');
     const raw = $('#syncCfg').value, config = {};
+    const jm = raw.match(/#join=([^\s&]+)/);
+    if(jm){
+      try{ const j = JSON.parse(atob(decodeURIComponent(jm[1]))); LS.set('dash:sync', {code: j.code, config: j.config}); return location.reload(); }
+      catch(e){ return toast('연결 링크가 올바르지 않아요'); }
+    }
     for(const m of raw.matchAll(/["']?(\w+)["']?\s*:\s*["']([^"']*)["']/g)) config[m[1]] = m[2];
     if(!code) return toast('학급 코드를 영문·숫자로 입력하세요');
     if(!config.apiKey || !config.projectId) return toast('firebaseConfig 를 확인하세요');
@@ -1028,6 +1078,19 @@ function openSettings(){
     LS.set('dash:sync', {code, config}); location.reload();
   };
   $('#syncOff').onclick = () => { LS.set('dash:sync', null); location.reload(); };
+  $('#viewMode').value = viewMode;
+  document.querySelectorAll('[data-join]').forEach(b => b.onclick = async () => {
+    const mode = b.dataset.join, base = $('#joinBase').value.trim();
+    const link = base.split('#')[0] + '#join=' + encodeURIComponent(btoa(JSON.stringify({code: sync.code, config: sync.config, mode})));
+    const box = $('#qrBox');
+    box.innerHTML = `<div id="qr"></div><div style="flex:1;min-width:220px"><b>${mode === 'student' ? '학생용' : '교사용'} 연결</b>
+      <textarea readonly style="min-height:80px;margin-top:6px">${esc(link)}</textarea><button class="btn gray" type="button" id="copyLink">링크 복사</button></div>`;
+    $('#copyLink').onclick = () => navigator.clipboard?.writeText(link).then(() => toast('복사했어요'));
+    try{
+      if(!window.QRCode) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js');
+      new QRCode($('#qr'), {text: link, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.L});
+    }catch(e){ $('#qr').textContent = 'QR을 만들지 못했어요 (링크를 복사해서 쓰세요)'; }
+  });
 
   $('#expBtn').onclick = () => {
     const a = document.createElement('a');
@@ -1061,6 +1124,8 @@ function openSettings(){
         .filter(x => x.name && x.url).map(x => ({...x, url: /^https?:\/\//.test(x.url) ? x.url : 'https://' + x.url})),
       tasks
     });
+    const vm = $('#viewMode').value;
+    if(vm !== viewMode){ viewMode = vm; LS.set('dash:mode', vm); document.body.classList.toggle('student', vm === 'student'); if(vm === 'student'){ locked = true; LS.set('dash:locked', true); applyLock(); } renderStudents(); }
     closeModal(); toast('저장했어요'); loadMeal(true); loadWeather(true);
   };
 }
